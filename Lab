@@ -1,0 +1,187 @@
+import pandas as pd
+import numpy as np
+import seaborn as sns
+
+from matplotlib import pyplot as plt
+
+from scipy import stats
+
+from sklearn.linear_model import LinearRegression
+from sklearn.model_selection import train_test_split
+
+import warnings
+warnings.filterwarnings('ignore')
+
+data_url = "http://lib.stat.cmu.edu/datasets/boston"
+raw_df = pd.read_csv(data_url, sep="\s+", skiprows=22, header=None)
+data = np.hstack([raw_df.values[::2, :], raw_df.values[1::2, :2]])
+target = raw_df.values[1::2, 2]
+
+data
+
+data.shape
+
+raw_df
+
+df = pd.DataFrame(data, columns=['CRIM', 'ZN', 'INDUS', 'CHAS', 'NOX', 'RM', 'AGE', 'DIS', 'RAD', 'TAX',
+       'PTRATIO', 'B', 'LSTAT'])
+
+df.head()
+
+dft = pd.DataFrame(target, columns=['MEDV'])
+
+dft
+
+df = pd.concat([df, dft], axis=1, sort=True)
+
+df.head()
+
+df.info()
+
+Очевидно, что пропусков в данных в этом датасете нет
+
+Прочитаем информацию о содержимом датасета
+
+Итак, у нас данные содержатся в 13 параметрах:
+- CRIM     уровень преступности на душу населения по городам
+- ZN       доля земли под жилую застройку зонирована под участки площадью более 25 000 кв.м.
+- INDUS    Доля акров неторгового бизнеса на город
+- CHAS     закодированная переменная Charles River (= 1, если участок граничит с рекой; 0 в противном случае)
+- NOX      Концентрация оксидов азота (частей на 10 миллионов)
+- RM       среднее количество комнат в жилом помещении
+- AGE      Доля квартир, занимаемых владельцами, построенных до 1940 г.
+- DIS      Взвешенные расстояния до пяти центров занятости Бостона
+- RAD      индекс доступности к радиальным магистралям
+- TAX      Полная ставка налога на имущество за 10 000 долларов США
+- PTRATIO  Соотношение учеников и учителей по городам
+- B        1000 (Bk - 0.63)^2, где Bk - доля чернокожих по городам
+- LSTAT    % населения с более низким статусом
+
+Целевая переменная:
+- MEDV     Средняя стоимость домов, занимаемых владельцами, в 1000 долларов.
+
+Информация об отсутствии пропусков в данных также подтверждается в описании
+
+Посмотрим на статистические характеристики для данных
+
+df.describe()
+
+df.columns
+
+С самого начала две колонки данных показывают особенные характеристики. Это:
+- ZN (доля земли под жилую застройку, зонированная под участки площадью более 25 000 кв. футов) с 0 для 25-го, 50-го квантилей.
+
+- Во-вторых, CHAS: фиктивная переменная реки Чарльз (1, если участок граничит с рекой; 0 в противном случае) с 0 для 25-го, 50-го и 75-го квантилей.
+
+Эти характеристики понятны, поскольку обе являются условными + категориальными переменными.
+
+Первое предположение будет заключаться в том, что эти столбцы могут быть бесполезны в задаче регрессии для прогнозирования MEDV (медианная стоимость домов, занимаемых владельцами).
+
+Еще одним интересным фактом в наборе данных является максимальное значение MEDV. Ранее в описании этого датасета было указано, что на данную переменную, по-видимому, может быть наложено какое-то ограничение (условие) на уровне 50,00 (соответствует средней цене в 50 000 долларов). Исходя из этого, значения выше 50,00 могут не помочь в прогнозировании MEDV. Давайте построим набор данных и посмотрим интересные тенденции/статистику.
+
+fig, axs = plt.subplots(ncols=7, nrows=2, figsize=(20, 10))
+index = 0
+axs = axs.flatten()
+for k,v in df.items():
+    sns.boxplot(y=k, data=df, ax=axs[index])
+    index += 1
+plt.tight_layout(pad=0.4, w_pad=0.5, h_pad=5.0)
+
+Такие столбцы, как CRIM, ZN, RM, B, похоже, имеют выбросы. Давайте посмотрим процент выбросов в каждом столбце.
+
+for k, v in df.items():
+    q1 = v.quantile(0.25)
+    q3 = v.quantile(0.75)
+    irq = q3 - q1
+    v_col = v[(v <= q1 - 1.5 * irq) | (v >= q3 + 1.5 * irq)]
+    perc = np.shape(v_col)[0] * 100.0 / np.shape(df)[0]
+    print("Column %s outliers = %.2f%%" % (k, perc))
+
+Давайте удалим выбросы MEDV (MEDV = 50,0), прежде чем строить другие распределения.
+
+df = df[~(df['MEDV'] >= 50.0)]
+print(np.shape(df))
+
+Теперь посмотрим, как выглядят распределения характеристик датасета по отношению к новому MEDV.
+
+fig, axs = plt.subplots(ncols=7, nrows=2, figsize=(20, 10))
+index = 0
+axs = axs.flatten()
+for k,v in df.items():
+    sns.distplot(v, ax=axs[index])
+    index += 1
+plt.tight_layout(pad=0.4, w_pad=0.5, h_pad=5.0)
+
+На гистограммах также видно, что столбцы CRIM, ZN, B имеют сильно смещенные распределения. Кроме того, MEDV, похоже, имеет нормальное распределение (таргет), а другие столбцы, похоже, имеют нормальное или бимодальное распределение данных, за исключением CHAS (который является бинарной переменной).
+
+Теперь давайте построим парную корреляцию данных. Тепловая карта корреляции может дать нам понимание того, какие переменные важны. Поскольку наш набор данных не слишком велик, изобразим корреляционную матрицу для всего набора данных
+
+plt.figure(figsize=(20, 10))
+sns.heatmap(df.corr().abs(),  annot=True)
+
+судя по карте, TAX и RAD являются сильно коррелированными функциями.
+
+Столбцы LSTAT, INDUS, RM, TAX, NOX, PTRAIO имеют показатель корреляции выше 0,5 с MEDV, что является хорошим показателем использования в качестве предикторов.
+
+Давайте нанесем эти столбцы на график MEDV.
+
+но, сначала нормализуем данные
+
+from sklearn import preprocessing
+min_max_scaler = preprocessing.MinMaxScaler()
+
+column_sels = ['LSTAT', 'INDUS', 'NOX', 'PTRATIO', 'RM', 'TAX', 'DIS', 'AGE']
+x = df.loc[:,column_sels]
+y = df['MEDV']
+
+X = pd.DataFrame(data=min_max_scaler.fit_transform(x), columns=column_sels)
+fig, axs = plt.subplots(ncols=4, nrows=2, figsize=(20, 10))
+index = 0
+axs = axs.flatten()
+for i, k in enumerate(column_sels):
+    sns.regplot(y=y, x=x[k], ax=axs[i])
+plt.tight_layout(pad=0.4, w_pad=0.5, h_pad=5.0)
+
+
+Таким образом, на основании данного анализа мы можем попытаться предсказать MEDV с характеристиками 'LSTAT', 'INDUS', 'NOX', 'PTRATIO', 'RM', 'TAX', 'DIS', 'AGE'. Попробуем убрать асимметрию данных путем преобразования датасета.
+
+y =  np.log1p(y)
+for col in X.columns:
+    if np.abs(X[col].skew()) > 0.3:
+        X[col] = np.log1p(X[col])
+
+### построим модель линейной регрессии и Ridge-регрессии
+
+from sklearn import datasets, linear_model
+from sklearn.model_selection import cross_val_score
+from sklearn.model_selection import KFold
+
+l_regression = linear_model.LinearRegression()
+kf = KFold(n_splits=10)
+min_max_scaler = preprocessing.MinMaxScaler()
+x_scaled = min_max_scaler.fit_transform(X)
+scores = cross_val_score(l_regression, x_scaled, y, cv=kf, scoring='neg_mean_squared_error')
+print("MSE: %0.2f (+/- %0.2f)" % (scores.mean(), scores.std()))
+
+scores_map = {}
+scores_map['LinearRegression'] = scores
+
+l_ridge = linear_model.Ridge()
+scores = cross_val_score(l_ridge, x_scaled, y, cv=kf, scoring='neg_mean_squared_error')
+scores_map['Ridge'] = scores
+print("MSE: %0.2f (+/- %0.2f)" % (scores.mean(), scores.std()))
+
+Попробуем, как на этих данных работает полиномиальная регрессия
+
+from sklearn.pipeline import make_pipeline
+from sklearn.preprocessing import PolynomialFeatures
+#for degree in range(2, 6):
+#    model = make_pipeline(PolynomialFeatures(degree=degree), linear_model.Ridge())
+#    scores = cross_val_score(model, x_scaled, y, cv=kf, scoring='neg_mean_squared_error')
+#    print("MSE: %0.2f (+/- %0.2f)" % (scores.mean(), scores.std()))
+model = make_pipeline(PolynomialFeatures(degree=3), linear_model.Ridge())
+scores = cross_val_score(model, x_scaled, y, cv=kf, scoring='neg_mean_squared_error')
+scores_map['PolyRidge'] = scores
+print("MSE: %0.2f (+/- %0.2f)" % (scores.mean(), scores.std()))
+
+Линейная регрессия с регуляризацией L2 и без нее не имеет существенного значения для оценки MSE. Однако полиномиальная регрессия со степенью = 3 имеет лучшую MSE.
